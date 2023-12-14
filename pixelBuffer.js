@@ -1,4 +1,4 @@
-const { hexDebugString } = require('./utils.js');
+const { hexDebugString, PixelData } = require('./utils.js');
 
 const PixelDisplayBuffer = function(manager, x, y, width, height, zIndex) {
 	// Private variables for internal reference
@@ -19,6 +19,11 @@ const PixelDisplayBuffer = function(manager, x, y, width, height, zIndex) {
 
 	let bufferId; // get assigned by manager after creation
 	this.assignId = id => bufferId = id;
+
+	// In-application configuration
+	this.wrap = false;
+	this.opacity = 100;
+	this.pauseRenders = false;
 
 	const canvas = new Uint32Array(bufferSize);
 	const current = new Uint32Array(bufferSize);
@@ -41,9 +46,6 @@ const PixelDisplayBuffer = function(manager, x, y, width, height, zIndex) {
 
 	this.centerWidth = width => Math.floor(bufferWidth / 2 - width / 2);
 	this.centerHeight = height => Math.floor(bufferHeight / 2 - height / 2);
-
-	this.wrap = false;
-	this.opacity = 100;
 
 	// this.write(color);
 	// this.write(color, count);
@@ -118,13 +120,13 @@ const PixelDisplayBuffer = function(manager, x, y, width, height, zIndex) {
 		current[botIndex] = bottom;
 	}
 
-	const sendDrawRequest = (top, bottom, botIndex) => {
+	const sendDrawRequest = (top, bottom, botIndex, requestFunction) => {
 		const x = botIndex % bufferWidth;
 		const y = Math.floor(botIndex / bufferWidth) - 1;
 		const screenX = bufferX + x;
 		const screenY = Math.floor((bufferY + y) / 2);
-		const pixel = manager.pixel(top, bottom);
-		manager.requestDraw(bufferId, pixel, screenX, screenY, bufferZ);
+		const pixel = new PixelData(top, bottom);
+		requestFunction(bufferId, pixel, screenX, screenY, bufferZ);
 	}
 
 	const render = topIndex => {
@@ -136,7 +138,7 @@ const PixelDisplayBuffer = function(manager, x, y, width, height, zIndex) {
 		transferToCurrent(top, bottom, topIndex, botIndex);
 
 		if (top != currentTop || bottom != currentBottom)
-			sendDrawRequest(top, bottom, botIndex);
+			sendDrawRequest(top, bottom, botIndex, manager.requestDraw);
 	}
 
 	const paint = topIndex => {
@@ -148,10 +150,23 @@ const PixelDisplayBuffer = function(manager, x, y, width, height, zIndex) {
 		transferToCurrent(top, bottom, topIndex, botIndex);
 
 		if (top != currentTop || bottom != currentBottom)
-			sendDrawRequest(top, bottom, botIndex);
+			sendDrawRequest(top, bottom, botIndex, manager.requestDraw);
 	}
 
-	const handleRender = renderFunction => {
+	const ghostRender = topIndex => {
+		const botIndex = topIndex + bufferWidth;
+		const top = canvas[topIndex];
+		const bottom = canvas[botIndex];
+		const currentTop = current[topIndex];
+		const currentBottom = current[botIndex];
+		transferToCurrent(top, bottom, topIndex, botIndex);
+
+		if (top != currentTop || bottom != currentBottom)
+			sendDrawRequest(top, bottom, botIndex, manager.requestGhostDraw);
+	}
+
+	const handleRender = (renderFunction, execute = true) => {
+		if (manager.pauseRenders || this.pauseRenders) return;
 		let i = 0 - bufferWidth * (bufferY & 1);
 		do { // Loop through every other row
 			let j = 0;
@@ -161,60 +176,18 @@ const PixelDisplayBuffer = function(manager, x, y, width, height, zIndex) {
 			} while (j < bufferWidth);
 			i += bufferWidth * 2;
 		} while (i < bufferSize);
-		manager.executeRender();
+		if (execute) manager.executeRender();
 	}
 
 	this.render = () => handleRender(render);
 	this.paint = () => handleRender(paint);
+	this.ghostRender = () => handleRender(ghostRender, false);
 
-	// Debug
-	const debugCanvas = () => {
-		console.log();
-		let i = 0;
-		do {
-			const x = i % bufferWidth;
-			const y = Math.floor(i / bufferWidth);
-			const canvasColor = canvas[i];
-			colorString = hexDebugString(canvasColor);
-			process.stdout.write(colorString + ' ');
-			if (!((i + 1) % bufferWidth)) process.stdout.write('\n');
-			i++;
-		} while (i < bufferSize);
-	}
-	
-	this.debugCanvas = (debugX, debugY) => {
-		const columnWidth = 15;
-		process.stdout.cursorTo(debugX, debugY);
-		const hr = '_'.repeat(columnWidth * bufferWidth);
-		console.log('\x1b[0m' + hr);
-		let i = 0;
-		do {
-			const x = i % bufferWidth;
-			const y = Math.floor(i / bufferWidth);
-			const canvasColor = canvas.at(i);
-			const currentColor = current.at(i);
-			let colorString;
-			let numberString = '';
-			if (canvasColor) {
-				numberString = '\x1b[32m';
-				colorString = hexDebugString(canvasColor);
-			} else if (currentColor) {
-				numberString = '\x1b[31m';
-				colorString = hexDebugString(currentColor);
-			} else {
-				colorString = '       ';
-			}
-			process.stdout.cursorTo(debugX + x * columnWidth, debugY + 1 + y * 2);
-			process.stdout.write('| ' + numberString.concat(i.toString()) + ' '.repeat(i < 10 ? 2 : 1) + colorString);
-			if (i % bufferWidth == 0) {
-				process.stdout.cursorTo(debugX, debugY + 2 + y * 2);
-				process.stdout.write(hr);
-			}
-			i++;
-		} while (i < bufferSize);
-		process.stdout.cursorTo(debugX, debugY + bufferHeight * 2 + 2);
-	}
-
+	/* TODO:
+		[ ] this.move(screenX, screenY);
+		[ ] this.quietMove(screenX, screenY);
+		[ ] this.setZIndex(zIndex); ehh, when are you really gonna change the zIndex?
+	*/
 }
 
 module.exports = PixelDisplayBuffer;

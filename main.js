@@ -3,7 +3,11 @@ const PixelDisplayBuffer = require('./pixelBuffer.js');
 const Construction = require('./construction.js');
 const { getHex, getOpacity, checkOpacity, fadeColor } = require('./utils.js');
 
-const BufferManager = function() {
+const TerminalDisplayEngine = function() {
+	// In-application configuration
+	this.charOnPixelSolution = 'blur'; // blur, top, bottom
+	this.pauseRenders = false;
+
 	// Buffer creation
 	const createdBuffers = [];
 	const createBuffer = (text, x, y, width, height, zIndex) => {
@@ -174,8 +178,8 @@ const BufferManager = function() {
 
 	// Rendering
 	let currentRender = [];
-	const addToCurrentRender = (charData, x, y, screenIndex) => {
-		const { code, fg, bg } = charData;
+	const addToCurrentRender = (point, x, y, screenIndex) => {
+		const { code, fg, bg } = point;
 
 		const differentThanScreen =
 			screenCodes[screenIndex] != code ||
@@ -208,8 +212,17 @@ const BufferManager = function() {
 		if (screenIndex == null) return;
 		const construction = screenConstruction[screenIndex];
 		construction.apply(id, zIndex, data);
-		const output = construction.determineOutput();
+		const output = construction.determineOutput(this.charOnPixelSolution);
 		addToCurrentRender(output, x, y, screenIndex);
+	}
+
+	const ghostRenderIndeces = new Set();
+	this.requestGhostDraw = (id, data, x, y, zIndex) => {
+		const screenIndex = getScreenIndex(x, y);
+		if (screenIndex == null) return;
+		const construction = screenConstruction[screenIndex];
+		construction.apply(id, zIndex, data);
+		ghostRenderIndeces.add(screenIndex);
 	}
 
 	this.executeRender = () => {
@@ -217,20 +230,24 @@ const BufferManager = function() {
 		currentRender = [];
 	}
 
-	// Data sent from TextDisplayBuffer and PixelDisplayBuffer
-	const PointData = function(code, fg, bg) {
-		this.type = 'point';
-		this.code = code;
-		this.fg = fg;
-		this.bg = bg;
+	this.executeGhostRender = () => {
+		ghostRenderIndeces.forEach(screenIndex => {
+			const construction = screenConstruction[screenIndex];
+			const output = construction.determineOutput(this.charOnPixelSolution);
+			const x = screenIndex % screenWidth;
+			const y = Math.floor(screenIndex / screenWidth);
+			addToCurrentRender(output, x, y, screenIndex);
+		});
+		this.executeRender();
+		ghostRenderIndeces.clear();
 	}
-	const PixelData = function(top, bottom) {
-		this.type = 'pixel';
-		this.top = top;
-		this.bottom = bottom;
+
+	this.massRender = () => {
+		if (this.pauseRenders) return;
+		for (const buffer of createdBuffers)
+			if (!buffer.persistent) buffer.ghostRender();
+		this.executeGhostRender();
 	}
-	this.point = (code, fg, bg) => new PointData(code, fg, bg);
-	this.pixel = (top, bottom) => new PixelData(top, bottom);
 
 	// Initialization and exiting application
 	const clearScreenString = '\x1b[0m\x1b[?25l\x1b[2J\x1b[1;1H';
@@ -242,4 +259,4 @@ const BufferManager = function() {
 	}
 }
 
-module.exports = BufferManager;
+module.exports = TerminalDisplayEngine;

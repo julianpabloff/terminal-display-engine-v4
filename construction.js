@@ -61,7 +61,13 @@ const Construction = function() {
 		else deleteById(id);
 	}
 
-	this.determineOutput = () => {
+	const getPixelRGBAFunctions = {
+		'blur': (topRGBA, botRGBA) => blurredRGBA(topRGBA, botRGBA),
+		'top': (topRGBA, botRGBA) => topRGBA,
+		'bottom': (topRGBA, botRGBA) => botRGBA
+	};
+
+	this.determineOutput = (charOnPixelSolution) => {
 		let outputCode = 32;
 		let outputFg = 0;
 		let outputBg = 0;
@@ -89,6 +95,7 @@ const Construction = function() {
 			}
 		}
 
+		const getPixelRGBA = getPixelRGBAFunctions[charOnPixelSolution];
 		const processPixel = pixel => {
 			const { top, bottom } = pixel;
 			topRGBA = layeredRGBA(new RGBA(top), topRGBA);
@@ -96,7 +103,7 @@ const Construction = function() {
 			
 			if (getOpacity(top) || getOpacity(bottom)) {
 				outputCode = 32;
-				bgRGBA = blurredRGBA(topRGBA, botRGBA);
+				bgRGBA = getPixelRGBA(topRGBA, botRGBA);
 			}
 		}
 
@@ -125,6 +132,7 @@ const Construction = function() {
 
 		return { code: outputCode, fg: outputFg, bg: outputBg };
 	}
+
 
 
 	// Debug

@@ -1,3 +1,5 @@
+const { PointData } = require('./utils.js');
+
 const TextDisplayBuffer = function(manager, x, y, width, height, zIndex) {
 	// Private variables for internal reference
 	let bufferX = x;
@@ -19,6 +21,11 @@ const TextDisplayBuffer = function(manager, x, y, width, height, zIndex) {
 
 	let bufferId; // gets assigned by manager after creation
 	this.assignId = id => bufferId = id;
+
+	// In-application configuration
+	this.wrap = false;
+	this.opacity = 100;
+	this.pauseRenders = false;
 
 	// Canvas: the array that you are drawing on that you eventually render to this buffer
 	// Current: what's already been rendered on this buffer
@@ -52,9 +59,6 @@ const TextDisplayBuffer = function(manager, x, y, width, height, zIndex) {
 
 	this.centerWidth = width => Math.floor(bufferWidth / 2 - width / 2);
 	this.centerHeight = height => Math.floor(bufferHeight / 2 - height / 2);
-
-	this.wrap = false;
-	this.opacity = 100;
 
 	const writeToCanvas = (index, code, brush) => {
 		canvasCodes[index] = code;
@@ -114,12 +118,11 @@ const TextDisplayBuffer = function(manager, x, y, width, height, zIndex) {
 		currentBGs[index] = bg;
 	}
 
-	// Send null to tell manager to remove buffer from construction
-	const sendDrawRequest = (index, code, fg, bg) => {
+	const sendDrawRequest = (index, code, fg, bg, requestFunction) => {
 		const screenX = bufferX + index % bufferWidth;
 		const screenY = bufferY + Math.floor(index / bufferWidth);
-		const point = code ? manager.point(code, fg, bg) : null;
-		manager.requestDraw(bufferId, point, screenX, screenY, bufferZ);
+		const point = new PointData(code, fg, bg);
+		requestFunction(bufferId, point, screenX, screenY, bufferZ);
 	}
 
 	const render = index => {
@@ -132,10 +135,9 @@ const TextDisplayBuffer = function(manager, x, y, width, height, zIndex) {
 		transferToCurrent(index, code, fg, bg);
 
 		if (code != currentCode || fg != currentFg || bg != currentBg)
-			sendDrawRequest(index, code, fg, bg);
+			sendDrawRequest(index, code, fg, bg, manager.requestDraw);
 	}
 
-	// TODO: test this
 	const paint = index => {
 		const currentCode = currentCodes[index];
 		const currentFg = currentFGs[index];
@@ -146,21 +148,41 @@ const TextDisplayBuffer = function(manager, x, y, width, height, zIndex) {
 		transferToCurrent(index, code, fg, bg);
 
 		if (code != currentCode || fg != currentFg || bg != currentBg)
-			sendDrawRequest(index, code, fg, bg);
+			sendDrawRequest(index, code, fg, bg, manager.requestDraw);
 	}
 
-	const handleRender = renderFunction => {
+	const ghostRender = index => {
+		const code = canvasCodes[index];
+		const fg = canvasFGs[index];
+		const bg = canvasBGs[index];
+		const currentCode = currentCodes[index];
+		const currentFg = currentFGs[index];
+		const currentBg = currentBGs[index];
+		transferToCurrent(index, code, fg, bg);
+
+		if (code != currentCode || fg != currentFg || bg != currentBg)
+			sendDrawRequest(index, code, fg, bg, manager.requestGhostDraw);
+	}
+
+	const handleRender = (renderFunction, execute = true) => {
+		if (manager.pauseRenders || this.pauseRenders) return;
 		let i = 0;
 		do { // Loop through buffer
 			renderFunction(i);
 			i++;
 		} while (i < bufferSize);
-		manager.executeRender();
+		if (execute) manager.executeRender();
 	}
 
 	this.render = () => handleRender(render);
 	this.paint = () => handleRender(paint);
+	this.ghostRender = () => handleRender(ghostRender, false);
 
+	/* TODO:
+		[ ] this.move(screenX, screenY);
+		[ ] this.quietMove(screenX, screenY);
+		[ ] this.setZIndex(zIndex); ehh, when are you really gonna change the zIndex?
+	*/
 }
 
 module.exports = TextDisplayBuffer;

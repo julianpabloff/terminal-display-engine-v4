@@ -14,6 +14,19 @@ const fadeColor = (colorCode, opacity) => {
 	return getHex(colorCode) + (newOpacity << 24);
 }
 
+const PointData = function(code, fg, bg) {
+	this.type = 'point';
+	this.code = code;
+	this.fg = fg;
+	this.bg = bg;
+}
+
+const PixelData = function(top, bottom) {
+	this.type = 'pixel';
+	this.top = top;
+	this.bottom = bottom;
+}
+
 // const rgba = new RGBA(colorCode);
 // const rgba = new RGBA(r, g, b, a);
 const RGBA = function(colorInput = 0) {
@@ -80,5 +93,7 @@ module.exports = {
 	getOpacity,
 	hexDebugString,
 	layeredRGBA,
-	RGBA
+	RGBA,
+	PointData,
+	PixelData
 };

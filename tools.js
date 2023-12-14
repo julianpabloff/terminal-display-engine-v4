@@ -1,31 +1,6 @@
-const { checkOpacity, getHex, getOpacity } = require('./utils.js');
+const { checkOpacity, getHex, getOpacity, RGBA } = require('./utils.js');
 
-const BufferTools = function(manager) {
-	// COLOR TOOLS
-	/*
-	const getOpacity = code => code >> 24;
-	const getHex = code => code & 0xffffff;
-	const checkOpacity = opacity => {
-		if (opacity < 0) return 0;
-		if (opacity > 100) return 100;
-		return opacity;
-	}
-	*/
-
-	const RGBA = function(r, g, b, a) {
-		this.r = r; this.g = g; this.b = b; this.a = a;
-	}
-	const getRGBA = color => {
-		const hex = getHex(color);
-		return new RGBA(hex >> 16, (hex >> 8) & 0xff, hex & 0xff, color >> 24);
-	}
-	const setRGBA = rgba =>
-		(Math.round(rgba.a) << 24) +
-		(Math.round(rgba.r) << 16) +
-		(Math.round(rgba.g) << 8) +
-		Math.round(rgba.b);
-	const emptyRGBA = new RGBA(0, 0, 0, 0);
-
+const TerminalDisplayTools = function() {
 	this.hex = (hex, opacity = 100) => hex + (checkOpacity(opacity) << 24);
 	this.rgba = (r, g, b, a = 100) => (checkOpacity(a) << 24) + (r << 16) + (g << 8) + b;
 
@@ -47,6 +22,15 @@ const BufferTools = function(manager) {
 	for (const [name, value] of Object.entries(colorPresets))
 		this.colors[name] = this.hex(value);
 
+	const randomPrimary = () => Math.floor(Math.random() * 256);
+	const randomHex = () => (randomPrimary() << 16) + (randomPrimary() << 8) + randomPrimary();
+	this.colors.random = () => this.hex(randomHex());
+
+	this.getNegative = color => {
+		const negativeHex = 0xffffff - (color & 0xffffff);
+		return negativeHex + (getOpacity(color) << 24);
+	}
+
 	this.linearGradient = (colorArray, count, inclusive = true) => {
 		const output = new Uint32Array(count);
 		const lerp = (start, end, t) => (1 - t) * start + t * end;
@@ -61,8 +45,8 @@ const BufferTools = function(manager) {
 
 			const color1 = colorArray[index];
 			const color2 = colorArray[index + 1];
-			const RGBA1 = getRGBA(color1);
-			const RGBA2 = color2 ? getRGBA(color2) : emptyRGBA;
+			const RGBA1 = new RGBA(color1);
+			const RGBA2 = new RGBA(color2 ? color2 : 0);
 
 			const outputRGBA = new RGBA(
 				lerp(RGBA1.r, RGBA2.r, t),
@@ -70,7 +54,7 @@ const BufferTools = function(manager) {
 				lerp(RGBA1.b, RGBA2.b, t),
 				lerp(RGBA1.a, RGBA2.a, t)
 			);
-			output[i] = setRGBA(outputRGBA);
+			output[i] = outputRGBA.toCode();
 
 			i++;
 		} while (i < count);
@@ -83,7 +67,24 @@ const BufferTools = function(manager) {
 		return this.linearGradient(rainbow, length, false);
 	}
 
-	this.outline
+	// BUFFER TOOLS
+	this.outlineBuffer = (buffer, color) => {
+		const sq = { tl: '┌', h: '─', tr: '┐', v: '│', bl: '└', br: '┘' };
+		// Top line
+		buffer.draw(sq.tl + sq.h.repeat(buffer.width - 2) + sq.tr, 0, 0, color);
+		// Vertical walls
+		for (let i = 1; i < buffer.height - 1; i++)
+			buffer.draw(sq.v, 0, i, color).draw(sq.v, buffer.end, i, color);
+		// Bottom line
+		buffer.draw(sq.bl + sq.h.repeat(buffer.width - 2) + sq.br, 0, buffer.bottom, color);
+		return buffer; // For buffer method chaining
+	}
+
+	/* TODO:
+		[ ] this.positionBuffer(buffer, positionX, positionY);
+		[ ] this.positionBufferX(buffer, positionX);
+		[ ] this.positionBufferY(buffer, positionY);
+	*/
 }
 
-module.exports = BufferTools;
+module.exports = TerminalDisplayTools;
