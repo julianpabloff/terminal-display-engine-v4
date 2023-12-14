@@ -56,6 +56,9 @@ const Construction = function() {
 		}
 	}
 
+	this.move = (id, newZIndex) => {
+	}
+
 	this.apply = (id, zIndex, data) => {
 		if (data) addSorted(id, zIndex, data);
 		else deleteById(id);

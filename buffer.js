@@ -125,7 +125,7 @@ const TextDisplayBuffer = function(manager, x, y, width, height, zIndex) {
 		requestFunction(bufferId, point, screenX, screenY, bufferZ);
 	}
 
-	const render = index => {
+	const render = (index, requestFunction) => {
 		const code = canvasCodes[index];
 		const fg = canvasFGs[index];
 		const bg = canvasBGs[index];
@@ -135,10 +135,10 @@ const TextDisplayBuffer = function(manager, x, y, width, height, zIndex) {
 		transferToCurrent(index, code, fg, bg);
 
 		if (code != currentCode || fg != currentFg || bg != currentBg)
-			sendDrawRequest(index, code, fg, bg, manager.requestDraw);
+			sendDrawRequest(index, code, fg, bg, requestFunction);
 	}
 
-	const paint = index => {
+	const paint = (index, requestFunction) => {
 		const currentCode = currentCodes[index];
 		const currentFg = currentFGs[index];
 		const currentBg = currentBGs[index];
@@ -148,40 +148,94 @@ const TextDisplayBuffer = function(manager, x, y, width, height, zIndex) {
 		transferToCurrent(index, code, fg, bg);
 
 		if (code != currentCode || fg != currentFg || bg != currentBg)
-			sendDrawRequest(index, code, fg, bg, manager.requestDraw);
+			sendDrawRequest(index, code, fg, bg, requestFunction);
 	}
 
-	const ghostRender = index => {
-		const code = canvasCodes[index];
-		const fg = canvasFGs[index];
-		const bg = canvasBGs[index];
-		const currentCode = currentCodes[index];
-		const currentFg = currentFGs[index];
-		const currentBg = currentBGs[index];
-		transferToCurrent(index, code, fg, bg);
+	const move = (index, requestFunction) => {
+		const localX = index % bufferWidth;
+		const localY = Math.floor(index / bufferWidth);
+		const eraseX = bufferX + localX;
+		const eraseY = bufferY + localY;
+		const drawX = pendingX + localX;
+		const drawY = pendingY + localY;
 
-		if (code != currentCode || fg != currentFg || bg != currentBg)
-			sendDrawRequest(index, code, fg, bg, manager.requestGhostDraw);
+		const code = currentCodes[index];
+		const fg = currentFGs[index];
+		const bg = currentBGs[index];
+
+		const lookbackX = localX - (pendingX - bufferX);
+		const lookbackY = localY - (pendingY - bufferY);
+		const lookbackIndex = coordinateIndex(lookbackX, lookbackY);
+		let differentContent = false;
+
+		if (lookbackIndex != null) {
+			const lookbackCode = currentCodes[lookbackIndex];
+			const lookbackFg = currentFGs[lookbackIndex];
+			const lookbackBg = currentBGs[lookbackIndex];
+			differentContent = code != lookbackCode || fg != lookbackFg || bg != lookbackBg;
+			if (differentContent) {
+				const point = new PointData(lookbackCode, lookbackFg, lookbackBg);
+				requestFunction(bufferId, point, eraseX, eraseY, bufferZ);
+			}
+		}
+
+		const noEraseOverlapX = eraseX < pendingX || eraseX > pendingX + bufferWidth - 1;
+		const noEraseOverlapY = eraseY < pendingY || eraseY > pendingY + bufferHeight - 1;
+		if (noEraseOverlapX || noEraseOverlapY)
+			requestFunction(bufferId, new PointData(), eraseX, eraseY, bufferZ);
+
+		const noDrawOverlapX = drawX < bufferX || drawX > bufferX + bufferWidth - 1;
+		const noDrawOverlapY = drawY < bufferY || drawY > bufferY + bufferHeight - 1;
+		if (noDrawOverlapX || noDrawOverlapY) {
+			const point = new PointData(code, fg, bg);
+			requestFunction(bufferId, point, drawX, drawY, bufferZ);
+		}
 	}
 
-	const handleRender = (renderFunction, execute = true) => {
+	const handleRender = (renderFunction, ghost = false) => {
 		if (manager.pauseRenders || this.pauseRenders) return;
+		const requestFunction = ghost ? manager.requestGhostDraw : manager.requestDraw;
 		let i = 0;
 		do { // Loop through buffer
-			renderFunction(i);
+			renderFunction(i, requestFunction);
 			i++;
 		} while (i < bufferSize);
-		if (execute) manager.executeRender();
+		if (!ghost) manager.executeRender();
 	}
+
+	let movePending = false;
+	let pendingX = bufferX;
+	let pendingY = bufferY;
 
 	this.render = () => handleRender(render);
 	this.paint = () => handleRender(paint);
-	this.ghostRender = () => handleRender(ghostRender, false);
+	this.ghostRender = () => {
+		if (!movePending) handleRender(render, true);
+		else { // Execute the ghost move and then paint the canvas as well
+			handleRender(move, true);
+			this.x = bufferX = pendingX;
+			this.y = bufferY = pendingY;
+			handleRender(paint, true);
+			movePending = false;
+			return;
+		}
+	}
+	this.move = (newX, newY) => {
+		pendingX = newX;
+		pendingY = newY;
+		handleRender(move);
+	}
+	this.quietMove = (newX, newY) => {
+		pendingX = newX;
+		pendingY = newY;
+		movePending = true;
+	}
 
 	/* TODO:
-		[ ] this.move(screenX, screenY);
-		[ ] this.quietMove(screenX, screenY);
+		[x] this.move(screenX, screenY);
+		[x] this.quietMove(screenX, screenY);
 		[ ] this.setZIndex(zIndex); ehh, when are you really gonna change the zIndex?
+		    - change the construction SLL order and determine output
 	*/
 }
 

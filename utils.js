@@ -14,14 +14,14 @@ const fadeColor = (colorCode, opacity) => {
 	return getHex(colorCode) + (newOpacity << 24);
 }
 
-const PointData = function(code, fg, bg) {
+const PointData = function(code = 0, fg = 0, bg = 0) {
 	this.type = 'point';
 	this.code = code;
 	this.fg = fg;
 	this.bg = bg;
 }
 
-const PixelData = function(top, bottom) {
+const PixelData = function(top = 0, bottom = 0) {
 	this.type = 'pixel';
 	this.top = top;
 	this.bottom = bottom;
