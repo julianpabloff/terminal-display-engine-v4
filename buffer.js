@@ -151,39 +151,41 @@ const TextDisplayBuffer = function(manager, x, y, width, height, zIndex) {
 			sendDrawRequest(index, code, fg, bg, requestFunction);
 	}
 
+	let pendingX = bufferX;
+	let pendingY = bufferY;
 	const move = (index, requestFunction) => {
+		const code = currentCodes[index];
+		const fg = currentFGs[index];
+		const bg = currentBGs[index];
+
 		const localX = index % bufferWidth;
 		const localY = Math.floor(index / bufferWidth);
 		const eraseX = bufferX + localX;
 		const eraseY = bufferY + localY;
 		const drawX = pendingX + localX;
 		const drawY = pendingY + localY;
-
-		const code = currentCodes[index];
-		const fg = currentFGs[index];
-		const bg = currentBGs[index];
-
 		const lookbackX = localX - (pendingX - bufferX);
 		const lookbackY = localY - (pendingY - bufferY);
 		const lookbackIndex = coordinateIndex(lookbackX, lookbackY);
-		let differentContent = false;
 
+		// Overlap region has to check for different content
 		if (lookbackIndex != null) {
 			const lookbackCode = currentCodes[lookbackIndex];
 			const lookbackFg = currentFGs[lookbackIndex];
 			const lookbackBg = currentBGs[lookbackIndex];
-			differentContent = code != lookbackCode || fg != lookbackFg || bg != lookbackBg;
-			if (differentContent) {
+			if (code != lookbackCode || fg != lookbackFg || bg != lookbackBg) {
 				const point = new PointData(lookbackCode, lookbackFg, lookbackBg);
 				requestFunction(bufferId, point, eraseX, eraseY, bufferZ);
 			}
 		}
 
+		// Erase region just has to clear the construction
 		const noEraseOverlapX = eraseX < pendingX || eraseX > pendingX + bufferWidth - 1;
 		const noEraseOverlapY = eraseY < pendingY || eraseY > pendingY + bufferHeight - 1;
 		if (noEraseOverlapX || noEraseOverlapY)
 			requestFunction(bufferId, new PointData(), eraseX, eraseY, bufferZ);
 
+		// Draw region just has to draw the buffer in the new zone
 		const noDrawOverlapX = drawX < bufferX || drawX > bufferX + bufferWidth - 1;
 		const noDrawOverlapY = drawY < bufferY || drawY > bufferY + bufferHeight - 1;
 		if (noDrawOverlapX || noDrawOverlapY) {
@@ -204,9 +206,8 @@ const TextDisplayBuffer = function(manager, x, y, width, height, zIndex) {
 	}
 
 	let movePending = false;
-	let pendingX = bufferX;
-	let pendingY = bufferY;
 
+	// TODO: Make render and paint execute a pending move
 	this.render = () => handleRender(render);
 	this.paint = () => handleRender(paint);
 	this.ghostRender = () => {
