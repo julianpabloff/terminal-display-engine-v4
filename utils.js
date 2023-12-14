@@ -17,7 +17,7 @@ const fadeColor = (colorCode, opacity) => {
 // const rgba = new RGBA(colorCode);
 // const rgba = new RGBA(r, g, b, a);
 const RGBA = function(colorInput = 0) {
-	if (arguments.length == 1) {
+	if (arguments.length < 2) {
 		const hex = getHex(colorInput);
 		this.r = hex >> 16;
 		this.g = (hex >> 8) & 0xff;
@@ -50,6 +50,19 @@ const layeredRGBA = (topRGBA, bottomRGBA) => {
 	);
 }
 
+const blurredRGBA = (rgba1, rgba2) => {
+	if (!rgba1.a) return rgba2;
+	if (!rgba2.a) return rgba1;
+	return new RGBA(
+		(rgba1.r + rgba2.r) / 2,
+		(rgba1.g + rgba2.g) / 2,
+		(rgba1.b + rgba2.b) / 2,
+		(rgba1.a + rgba2.a) / 2
+	);
+}
+
+const resetString = '\x1b[0m';
+const fgHexToString = hex => `\x1b[38;2;${hex >> 16};${(hex >> 8) & 0xff};${hex & 0xff}m`;
 const hexDebugString = color => {
 	if (!color) return resetString + '[empty]' + resetString;
 	const hex = getHex(color);
@@ -60,6 +73,7 @@ const hexDebugString = color => {
 }
 
 module.exports = {
+	blurredRGBA,
 	checkOpacity,
 	fadeColor,
 	getHex,

@@ -1,4 +1,4 @@
-const { getOpacity, hexDebugString, blurRGBA, layeredRGBA, RGBA } = require('./utils.js');
+const { getOpacity, hexDebugString, blurredRGBA, layeredRGBA, RGBA } = require('./utils.js');
 
 const Node = function(id, index, data) {
 	this.id = id;
@@ -51,7 +51,7 @@ const Construction = function() {
 		let runner = start;
 		while (runner.next) {
 			const node = runner.next;
-			callback(node.data, node.id, node.index);
+			callback(node.data);
 			runner = node;
 		}
 	}
@@ -61,86 +61,181 @@ const Construction = function() {
 		else deleteById(id);
 	}
 
-	const charOnPixelSolution = 'blur';
-	const emptyRGBA = new RGBA();
 	this.determineOutput = () => {
 		let outputCode = 32;
 		let outputFg = 0;
 		let outputBg = 0;
-		let fgRGBA, bgRGBA, topRGBA, botRGBA;
-		fgRGBA = bgRGBA = topRGBA = botRGBA = emptyRGBA;
-		/*
-		const stackHeight = addedIDs.size;
-		const topHalfStack = new Uint32Array(stackHeight);
-		const botHalfStack = new Uint32Array(stackHeight);
-		*/
+		let fgRGBA = new RGBA();
+		let bgRGBA = new RGBA();
+		let topRGBA = new RGBA();
+		let botRGBA = new RGBA();
 
-		const calcBgRGBA = bg => {
-			switch (charOnPixelSolution) {
-				case 'blur': return layeredRGBA(new RGBA(bg), blurRGBA(topRGBA, botRGBA));
-				case 'top': return layeredRGBA(new RGBA(bg), topRGBA);
-				case 'bottom': return layeredRGBA(new RGBA(bg), botRGBA);
-				// case 'blur' : return layerRGBA(getRGBA(bg), blurRGBA(topRGBA, botRGBA));
-				// case 'top' : return layerRGBA(getRGBA(bg), topRGBA);
-				// case 'bottom' : return layerRGBA(getRGBA(bg), botRGBA);
-			}
-		}
-
-		// const processPoint = (point, stackIndex) => {
 		const processPoint = point => {
 			const { code, fg, bg } = point;
 			const fgOpacity = getOpacity(fg);
 			const bgOpacity = getOpacity(bg);
 
-			bgRGBA = calcBgRGBA(bg);
 			if (bgOpacity) {
-				// const currentBgRGBA = getRGBA(bg);
-				const currentBgRGBA = new RGBA(bg);
-				if (bgOpacity > 99) { // Full opacity
-					outputCode = 32;
-					outputFg = 0;
-					outputBg = bg;
-				} else if (code == 32) // Layer background on top of foreground
-					fgRGBA = layeredRGBA(currentBgRGBA, fgRGBA);
-				topRGBA = layeredRGBA(currentBgRGBA, topRGBA);
-				botRGBA = layeredRGBA(currentBgRGBA, botRGBA);
-				// topHalfStack[stackIndex] = botHalfStack[stackIndex] = bg;
+				const initialBgRGBA = new RGBA(bg);
+				bgRGBA = layeredRGBA(initialBgRGBA, bgRGBA);
+				if (bgOpacity > 99) outputCode = 32;
+				else if (code == 32) fgRGBA = layeredRGBA(initialBgRGBA, fgRGBA);
+				topRGBA = layeredRGBA(initialBgRGBA, topRGBA);
+				botRGBA = layeredRGBA(initialBgRGBA, botRGBA);
 			}
 			if (code != 32 && fgOpacity) {
 				outputCode = code;
-				// fgRGBA = layeredRGBA(getRGBA(fg), bgRGBA);
 				fgRGBA = layeredRGBA(new RGBA(fg), bgRGBA);
 			}
 		}
 
-		// const processPixel = (pixel, stackIndex) => {
+		const processPixel = pixel => {
+			const { top, bottom } = pixel;
+			topRGBA = layeredRGBA(new RGBA(top), topRGBA);
+			botRGBA = layeredRGBA(new RGBA(bottom), botRGBA);
+			
+			if (getOpacity(top) || getOpacity(bottom)) {
+				outputCode = 32;
+				bgRGBA = blurredRGBA(topRGBA, botRGBA);
+			}
+		}
+
+		// Loop through construction
+		const processHandler = { point: processPoint, pixel: processPixel };
+		forEach(data => processHandler[data.type](data));
+
+		if (outputCode == 32) {
+			const top = topRGBA.toCode();
+			const bottom = botRGBA.toCode();
+			if (top != bottom) {
+				if (top) {
+					outputCode = 9600;
+					outputFg = top;
+					outputBg = bottom;
+				} else if (bottom) {
+					outputCode = 9604;
+					outputFg = bottom;
+					outputBg = top;
+				}
+			} else outputBg = top;
+		} else {
+			outputFg = fgRGBA.toCode();
+			outputBg = bgRGBA.toCode();
+		}
+
+		return { code: outputCode, fg: outputFg, bg: outputBg };
+	}
+
+
+	// Debug
+	const logRGBA = rgba => {
+		const { r, g, b, a } = rgba;
+		return ['RGBA { r:', r, 'g:', g, 'b:', b, 'a:', a, '}'];
+	}
+	const debug = () => {
+		console.log('CONSTRUCTION:');
+		forEach((data, id, index) => {
+			for (const [key, value] of Object.entries(data)) {
+				const logArray = ['   ', key];
+				if (key != 'code' && key != 'type')
+					logArray.push(hexDebugString(value), getOpacity(value), ...logRGBA(new RGBA(value)));
+				else logArray.push(value);
+				console.log(...logArray);
+			}
+			console.log();
+		});
+	}
+	this.determineOutputDebug = () => {
+		let outputCode = 32;
+		let outputFg = 0;
+		let outputBg = 0;
+		let fgRGBA = new RGBA();
+		let bgRGBA = new RGBA();
+		let topRGBA = new RGBA();
+		let botRGBA = new RGBA();
+		debug();
+
+		const logResult = () => {
+			console.log('\n  processing result: [ outputCode =', outputCode, ']');
+			console.log('    fg    ', hexDebugString(fgRGBA.toCode()), ...logRGBA(fgRGBA));
+			console.log('    bg    ', hexDebugString(bgRGBA.toCode()), ...logRGBA(bgRGBA));
+			console.log('    top   ', hexDebugString(topRGBA.toCode()), ...logRGBA(topRGBA));
+			console.log('    bottom', hexDebugString(botRGBA.toCode()), ...logRGBA(botRGBA));
+		}
+
+		const processPoint = point => {
+			const { code, fg, bg } = point;
+			const fgOpacity = getOpacity(fg);
+			const bgOpacity = getOpacity(bg);
+			console.log('PROCESSING point:', code, hexDebugString(fg), fgOpacity, hexDebugString(bg), bgOpacity);
+
+			const currentFgRGBACode = fgRGBA.toCode();
+			const currentBgRGBACode = bgRGBA.toCode();
+			if (bgOpacity) {
+				// We want to remember the pure RBGA for the background for layering it on
+				// top of the fg if neccessary as well as layering it on top of the pixel RGBAs
+				const initialBgRGBA = new RGBA(bg);
+				bgRGBA = layeredRGBA(initialBgRGBA, bgRGBA);
+				console.log('  - updating bgRGBA:', hexDebugString(bg), getOpacity(bg), 'layered on', hexDebugString(currentBgRGBACode), '-->', hexDebugString(bgRGBA.toCode()));
+				if (bgOpacity > 99) {
+					outputCode = 32;
+					// Maybe this is unecessary (spoiler: it is. When fgRGBA is needed (see below), it is determined without needing reference to past fgRGBA)
+					// fgRGBA = new RGBA();
+					// console.log('  - full bg opacity, clearing fgRGBA:', hexDebugString(currentFgRGBACode), '-->', hexDebugString(0));
+				} else if (code == 32) {
+					console.log('  - faded bg w/ no char, layering this bg on the current fgRGBA:');
+					fgRGBA = layeredRGBA(initialBgRGBA, fgRGBA);
+					console.log('    - updating fgRGBA:', hexDebugString(bg), bgOpacity, 'layered on', hexDebugString(currentFgRGBACode), '-->', hexDebugString(fgRGBA.toCode()));
+				}
+				console.log('  - layering initialBgRGBA on top & bottom RGBAs:');
+				const initialTopRGBACode = topRGBA.toCode();
+				const initialBotRGBACode = botRGBA.toCode();
+				topRGBA = layeredRGBA(initialBgRGBA, topRGBA);
+				botRGBA = layeredRGBA(initialBgRGBA, botRGBA);
+				console.log('    - updating topRGBA:', hexDebugString(bg), bgOpacity, 'layered on', hexDebugString(initialTopRGBACode), '-->', hexDebugString(topRGBA.toCode()));
+				console.log('    - updating botRGBA:', hexDebugString(bg), bgOpacity, 'layered on', hexDebugString(initialBotRGBACode), '-->', hexDebugString(botRGBA.toCode()));
+			}
+			if (code != 32 && fgOpacity) {
+				console.log('  - char present with fgOpacity, fading fg onto current bgRGBA:');
+				outputCode = code;
+				fgRGBA = layeredRGBA(new RGBA(fg), bgRGBA);
+				console.log('    - updating fgRGBA:', hexDebugString(fg), getOpacity(fg), 'layered on', hexDebugString(bgRGBA.toCode()), '-->', hexDebugString(fgRGBA.toCode()));
+			}
+		}
+
 		const processPixel = pixel => {
 			const { top, bottom } = pixel;
 			const topOpacity = getOpacity(top);
 			const botOpacity = getOpacity(bottom);
-			// topHalfStack[stackIndex] = top;
-			// botHalfStack[stackIndex] = bottom;
-			if (getOpacity(top) || getOpacity(bottom)) {
-				outputCode = 32;
-				fgRGBA = bgRGBA = emptyRGBA;
-			}
+			console.log('PROCESSING pixel:', hexDebugString(top), topOpacity, hexDebugString(bottom), botOpacity);
+
+			const currentTopRGBACode = topRGBA.toCode();
+			const currentBotRGBACode = botRGBA.toCode();
 			topRGBA = layeredRGBA(new RGBA(top), topRGBA);
 			botRGBA = layeredRGBA(new RGBA(bottom), botRGBA);
-			// topRGBA = layeredRGBA(getRGBA(top), topRGBA);
-			// botRGBA = layeredRGBA(getRGBA(bottom), botRGBA);
+			console.log('  - updating topRGBA:', hexDebugString(top), topOpacity, 'layered on', hexDebugString(currentTopRGBACode), '-->', hexDebugString(topRGBA.toCode()));
+			console.log('  - updating botRGBA:', hexDebugString(bottom), botOpacity, 'layered on', hexDebugString(currentBotRGBACode), '-->', hexDebugString(botRGBA.toCode()));
+
+			if (!topOpacity && !botOpacity) return;
+			console.log('  - pixel is present: clearing fgRGBA and updating bgRGBA');
+			const currentBgRGBACode = bgRGBA.toCode();
+			outputCode = 32;
+			fgRGBA = new RGBA();
+			bgRGBA = blurredRGBA(topRGBA, botRGBA);
+			console.log('    - clearing fgRGBA:', ...logRGBA(fgRGBA));
+			console.log('    - updating bgRGBA: blurring', hexDebugString(topRGBA.toCode()), topOpacity, 'and', hexDebugString(botRGBA.toCode()), botOpacity, 'to get', hexDebugString(bgRGBA.toCode()));
 		}
 
 		const processHandler = { point: processPoint, pixel: processPixel };
-		// let stackIndex = 0;
 		forEach(data => {
-			// processHandler[data.type](data, stackIndex);
+			console.log('-----');
 			processHandler[data.type](data);
-			// stackIndex++;
+			logResult();
 		});
 
+		console.log();
 		if (outputCode == 32) {
-			// const top = setRGBA(topRGBA);
-			// const bottom = setRGBA(botRGBA);
+			console.log('returning as PIXEL');
 			const top = topRGBA.toCode();
 			const bottom = botRGBA.toCode();
 			const topBlockCode = 9600;
@@ -157,69 +252,16 @@ const Construction = function() {
 				}
 			} else outputBg = top;
 		} else {
-			// outputFg = setRGBA(fgRGBA);
-			// outputBg = setRGBA(bgRGBA);
+			console.log('returning as POINT');
 			outputFg = fgRGBA.toCode();
 			outputBg = bgRGBA.toCode();
 		}
+		console.log('char:', outputCode, String.fromCharCode(outputCode));
+		console.log('fg:', hexDebugString(outputFg));
+		console.log('bg:', hexDebugString(outputBg));
 
+		console.log('--------------', '\n');
 		return { code: outputCode, fg: outputFg, bg: outputBg };
-		
-		/*
-		const logStack = stack => {
-			const stackLog = [];
-			stack.forEach(color => {
-				const opacity = getOpacity(color);
-				stackLog.push(
-					hexDebugString(color),
-					getOpacity(color),
-					' '.repeat(3 - (opacity > 0) - (opacity == 100))
-				)
-			});
-			return stackLog;
-		}
-		debug();
-		console.log('topStack ', ...logStack(topHalfStack));
-		console.log('botStack ', ...logStack(botHalfStack));
-		console.log('fg  ', hexDebugString(fgRGBA.toCode()), fgRGBA);
-		console.log('bg  ', hexDebugString(bgRGBA.toCode()), bgRGBA);
-		console.log('top ', hexDebugString(topRGBA.toCode()), topRGBA);
-		console.log('bot ', hexDebugString(botRGBA.toCode()), botRGBA);
-		console.log('\nevaluating as pixel', outputCode == 32);
-		console.log('OUTPUT: code', outputCode, 'fg', hexDebugString(outputFg), 'bg', hexDebugString(outputBg));
-		console.log();
-		*/
-	}
-
-
-	// Debug
-	/*
-	const fgHexToString = hex => `\x1b[38;2;${hex >> 16};${(hex >> 8) & 0xff};${hex & 0xff}m`;
-	const bgHexToString = hex => `\x1b[48;2;${hex >> 16};${(hex >> 8) & 0xff};${hex & 0xff}m`;
-	const resetString = '\x1b[0m';
-
-	const hexDebugString = color => {
-		if (!color) return resetString + '[none]' + resetString;
-		const hex = getHex(color);
-		const ansi = fgHexToString(hex);
-		const hexString = hex.toString(16);
-		const filler = '0'.repeat(6 - hexString.length);
-		return ansi + '#' + filler + hexString + resetString;
-	}
-	*/
-
-	const debug = () => {
-		console.log('CONSTRUCTION:');
-		forEach((data, id, index) => {
-			for (const [key, value] of Object.entries(data)) {
-				const logArray = ['   ', key];
-				if (key != 'code' && key != 'type')
-					logArray.push(hexDebugString(value), getOpacity(value), getRGBA(value));
-				else logArray.push(value);
-				console.log(...logArray);
-			}
-			console.log();
-		});
 	}
 }
 

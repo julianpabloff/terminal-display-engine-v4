@@ -59,9 +59,9 @@ const BufferManager = function() {
 	this.resetColor = () => this.setColor(1694498815, 0); // White default
 	this.resetColor();
 
-	this.processBrush = (fg = 0, bg = 0, bufferOpacity = 100) => {
-		if (!fg) fg = defaultFg;
-		if (!bg) bg = defaultBg;
+	this.processBrush = (fg, bg, bufferOpacity = 100) => {
+		if (fg == undefined) fg = defaultFg;
+		if (bg == undefined) bg = defaultBg;
 		if (checkOpacity(bufferOpacity) < 100) {
 			fg = fadeColor(fg, bufferOpacity);
 			bg = fadeColor(bg, bufferOpacity);
@@ -174,8 +174,14 @@ const BufferManager = function() {
 
 	// Rendering
 	let currentRender = [];
-	const addToCurrentRender = (charData, x, y) => {
+	const addToCurrentRender = (charData, x, y, screenIndex) => {
 		const { code, fg, bg } = charData;
+
+		const differentThanScreen =
+			screenCodes[screenIndex] != code ||
+			screenFGs[screenIndex] != fg ||
+			screenBGs[screenIndex] != bg;
+		if (!differentThanScreen) return;
 
 		const fgChanged = fg != terminalFg;
 		const bgChanged = bg != terminalBg;
@@ -190,18 +196,6 @@ const BufferManager = function() {
 		if (x != terminalX + 1 || y != terminalY) currentRender.push(moveCursorString(x, y));
 		currentRender.push(String.fromCharCode(code));
 		setTerminalData(x, y, fg, bg);
-	}
-
-	const requestRender = (charData, x, y) => {
-		const { code, fg, bg } = charData;
-		const screenIndex = getScreenIndex(x, y);
-
-		if (
-			screenCodes[screenIndex] != code ||
-			screenFGs[screenIndex] != fg ||
-			screenBGs[screenIndex] != bg
-		)
-			addToCurrentRender(charData, x, y);
 
 		screenCodes[screenIndex] = code;
 		screenFGs[screenIndex] = fg;
@@ -215,11 +209,10 @@ const BufferManager = function() {
 		const construction = screenConstruction[screenIndex];
 		construction.apply(id, zIndex, data);
 		const output = construction.determineOutput();
-		requestRender(output, x, y);
+		addToCurrentRender(output, x, y, screenIndex);
 	}
 
 	this.executeRender = () => {
-		// console.log(currentRender);
 		process.stdout.write(currentRender.join(''));
 		currentRender = [];
 	}

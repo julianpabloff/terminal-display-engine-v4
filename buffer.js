@@ -12,6 +12,8 @@ const TextDisplayBuffer = function(manager, x, y, width, height, zIndex) {
 	this.zIndex = bufferZ;
 	this.width = bufferWidth;
 	this.height = bufferHeight;
+	this.end = bufferWidth - 1;
+	this.bottom = bufferHeight - 1;
 	this.size = bufferSize;
 	this.type = 'text'; // This would be for the bufferTools to use
 
@@ -97,9 +99,9 @@ const TextDisplayBuffer = function(manager, x, y, width, height, zIndex) {
 	}
 
 	this.fill = color => {
-		const brush = manager.processBrush(color, color, this.opacity);
+		const brush = manager.processBrush(0, color, this.opacity);
 		canvasCodes.fill(32);
-		canvasFGs.fill(brush.fg);
+		canvasFGs.fill(0);
 		canvasBGs.fill(brush.bg);
 		return this;
 	}
