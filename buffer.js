@@ -225,6 +225,8 @@ const TextDisplayBuffer = function(manager, x, y, width, height, zIndex) {
 		pendingX = newX;
 		pendingY = newY;
 		handleRender(move);
+		this.x = bufferX = pendingX;
+		this.y = bufferY = pendingY;
 	}
 	this.quietMove = (newX, newY) => {
 		pendingX = newX;
