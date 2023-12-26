@@ -60,8 +60,14 @@ const TerminalDisplayEngine = function() {
 		defaultFg = fgCode;
 		defaultBg = bgCode;
 	}
-	this.resetColor = () => this.setColor(1694498815, 0); // White default
+	this.resetColor = () => this.setColor(1694498815, 0); // white default
 	this.resetColor();
+
+	this.sample = (x, y) => {
+		const screenIndex = getScreenIndex(x, y);
+		if (screenIndex == null) return { fg: 0, bg: 0 };
+		return { fg: screenFGs[screenIndex], bg: screenBGs[screenIndex] };
+	}
 
 	this.processBrush = (fg, bg, bufferOpacity = 100) => {
 		if (fg == undefined) fg = defaultFg;
@@ -230,7 +236,7 @@ const TerminalDisplayEngine = function() {
 		currentRender = [];
 	}
 
-	this.executeGhostRender = () => {
+	const executeGhostRender = () => {
 		ghostRenderIndeces.forEach(screenIndex => {
 			const construction = screenConstruction[screenIndex];
 			const output = construction.determineOutput(this.charOnPixelSolution);
@@ -242,11 +248,33 @@ const TerminalDisplayEngine = function() {
 		ghostRenderIndeces.clear();
 	}
 
-	this.massRender = () => {
+	const callBuffers = (buffers, callback) => {
 		if (this.pauseRenders) return;
-		for (const buffer of createdBuffers)
-			if (!buffer.persistent) buffer.ghostRender();
-		this.executeGhostRender();
+		for (const buffer of buffers)
+			if (!buffer.persistent) callback(buffer);
+		executeGhostRender();
+	}
+
+	// Simple methods for rendering or painting all or a group of buffers
+	this.massRender = () => callBuffers(createdBuffers, b => b.ghostRender());
+	this.massPaint = () => callBuffers(createdBuffers, b => b.ghostPaint());
+	this.groupRender = buffers => callBuffers(buffers, b => b.ghostRender());
+	this.groupPaint = buffers =>callBuffers(buffers, b => b.ghostPaint());
+
+	// Customize the rendering and painting of a group of specific buffers
+	// e.x. display.addToQueue(first, 'render').addToQueue(second, 'paint').executeQueue();
+	let customGroupQueue = [];
+	const bufferFunctions = { render: b => b.ghostRender(), paint: b => b.ghostPaint() };
+
+	this.addToQueue = (buffer, method = 'render') => {
+		customGroupQueue.push({ buffer, method });
+		return this;
+	}
+	this.executeQueue = () => {
+		if (this.pauseRenders) return;
+		for (const { buffer, method } of customGroupQueue) bufferFunctions[method](buffer);
+		executeGhostRender();
+		customGroupQueue = [];
 	}
 
 	// Initialization and exiting application

@@ -6,7 +6,7 @@ const TerminalDisplayTools = function() {
 
 	const colorPresets = {
 		white: 0xffffff,
-		gray: 0x808080,
+		grey: 0x808080,
 		black: 0,
 		red: 0xff0000,
 		orange: 0xffa500,
@@ -79,6 +79,9 @@ const TerminalDisplayTools = function() {
 		buffer.draw(sq.bl + sq.h.repeat(buffer.width - 2) + sq.br, 0, buffer.bottom, color);
 		return buffer; // For buffer method chaining
 	}
+
+	this.centerWidth = (width, totalWidth) => Math.floor(totalWidth / 2 - width / 2);
+	this.centerHeight = (height, totalHeight) => Math.floor(totalHeight / 2 - height / 2);
 
 	/* TODO:
 		[ ] this.positionBuffer(buffer, positionX, positionY);

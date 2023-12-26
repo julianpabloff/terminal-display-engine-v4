@@ -1,4 +1,4 @@
-const { PointData } = require('./utils.js');
+const { Point } = require('./utils.js');
 
 const TextDisplayBuffer = function(manager, x, y, width, height, zIndex) {
 	// Private variables for internal reference
@@ -23,9 +23,10 @@ const TextDisplayBuffer = function(manager, x, y, width, height, zIndex) {
 	this.assignId = id => bufferId = id;
 
 	// In-application configuration
-	this.wrap = false;
-	this.opacity = 100;
-	this.pauseRenders = false;
+	this.wrap = false; // whether this.write wraps in the buffer
+	this.opacity = 100; // overall opacity on top of brush opacity
+	this.pauseRenders = false; // stops all render operations
+	this.persistent = false; // prevents manager.massRender from changing this buffer
 
 	// Canvas: the array that you are drawing on that you eventually render to this buffer
 	// Current: what's already been rendered on this buffer
@@ -57,8 +58,11 @@ const TextDisplayBuffer = function(manager, x, y, width, height, zIndex) {
 		return this;
 	}
 
-	this.centerWidth = width => Math.floor(bufferWidth / 2 - width / 2);
-	this.centerHeight = height => Math.floor(bufferHeight / 2 - height / 2);
+	this.sample = (x, y) => {
+		const index = coordinateIndex(x, y);
+		if (index == null) return { fg: 0, bg: 0 };
+		return { fg: currentFGs[index], bg: currentBGs[index] };
+	}
 
 	const writeToCanvas = (index, code, brush) => {
 		canvasCodes[index] = code;
@@ -75,6 +79,7 @@ const TextDisplayBuffer = function(manager, x, y, width, height, zIndex) {
 		let i = 0;
 		do { // Loop through string
 			const index = cursorIndex + i;
+			// if (bg == undefined && !brush.bg) brush.bg = canvasBGs[index];
 			writeToCanvas(index, string.charCodeAt(i), brush);
 			i++;
 		} while (i < amount);
@@ -121,7 +126,7 @@ const TextDisplayBuffer = function(manager, x, y, width, height, zIndex) {
 	const sendDrawRequest = (index, code, fg, bg, requestFunction) => {
 		const screenX = bufferX + index % bufferWidth;
 		const screenY = bufferY + Math.floor(index / bufferWidth);
-		const point = new PointData(code, fg, bg);
+		const point = new Point(code, fg, bg);
 		requestFunction(bufferId, point, screenX, screenY, bufferZ);
 	}
 
@@ -151,48 +156,56 @@ const TextDisplayBuffer = function(manager, x, y, width, height, zIndex) {
 			sendDrawRequest(index, code, fg, bg, requestFunction);
 	}
 
-	let pendingX = bufferX;
-	let pendingY = bufferY;
-	const move = (index, requestFunction) => {
-		const code = currentCodes[index];
-		const fg = currentFGs[index];
-		const bg = currentBGs[index];
+	let newBufferX, newBufferY;
+	const move = (index, requestFunction, getCode, getFg, getBg) => {
+		const code = getCode(index);
+		const fg = getFg(index);
+		const bg = getBg(index);
+		transferToCurrent(index, code, fg, bg);
 
 		const localX = index % bufferWidth;
 		const localY = Math.floor(index / bufferWidth);
 		const eraseX = bufferX + localX;
 		const eraseY = bufferY + localY;
-		const drawX = pendingX + localX;
-		const drawY = pendingY + localY;
-		const lookbackX = localX - (pendingX - bufferX);
-		const lookbackY = localY - (pendingY - bufferY);
-		const lookbackIndex = coordinateIndex(lookbackX, lookbackY);
-
-		// Overlap region has to check for different content
-		if (lookbackIndex != null) {
-			const lookbackCode = currentCodes[lookbackIndex];
-			const lookbackFg = currentFGs[lookbackIndex];
-			const lookbackBg = currentBGs[lookbackIndex];
-			if (code != lookbackCode || fg != lookbackFg || bg != lookbackBg) {
-				const point = new PointData(lookbackCode, lookbackFg, lookbackBg);
-				requestFunction(bufferId, point, eraseX, eraseY, bufferZ);
-			}
-		}
+		const drawX = newBufferX + localX;
+		const drawY = newBufferY + localY;
 
 		// Erase region just has to clear the construction
-		const noEraseOverlapX = eraseX < pendingX || eraseX > pendingX + bufferWidth - 1;
-		const noEraseOverlapY = eraseY < pendingY || eraseY > pendingY + bufferHeight - 1;
+		const noEraseOverlapX = eraseX < newBufferX || eraseX > newBufferX + bufferWidth - 1;
+		const noEraseOverlapY = eraseY < newBufferY || eraseY > newBufferY + bufferHeight - 1;
 		if (noEraseOverlapX || noEraseOverlapY)
-			requestFunction(bufferId, new PointData(), eraseX, eraseY, bufferZ);
+			requestFunction(bufferId, new Point(), eraseX, eraseY, bufferZ);
 
-		// Draw region just has to draw the buffer in the new zone
-		const noDrawOverlapX = drawX < bufferX || drawX > bufferX + bufferWidth - 1;
-		const noDrawOverlapY = drawY < bufferY || drawY > bufferY + bufferHeight - 1;
-		if (noDrawOverlapX || noDrawOverlapY) {
-			const point = new PointData(code, fg, bg);
+		const lookaheadX = localX + (newBufferX - bufferX);
+		const lookaheadY = localY + (newBufferY - bufferY);
+		const lookaheadIndex = coordinateIndex(lookaheadX, lookaheadY);
+		const lookaheadCode = currentCodes[lookaheadIndex];
+		const lookaheadFg = currentFGs[lookaheadIndex];
+		const lookaheadBg = currentBGs[lookaheadIndex];
+
+		if (code != lookaheadCode || fg != lookaheadFg || bg != lookaheadBg) {
+			const point = new Point(code, fg, bg);
 			requestFunction(bufferId, point, drawX, drawY, bufferZ);
 		}
 	}
+
+	// Move function with render canvas handling
+	const renderMove = (index, requestFunction) => move(
+		index,
+		requestFunction,
+		i => canvasCodes[i],
+		i => canvasFGs[i],
+		i => canvasBGs[i]
+	);
+
+	// Move function with paint canvas handling
+	const paintMove = (index, requestFunction) => move(
+		index,
+		requestFunction,
+		i => canvasCodes[i] || currentCodes[i],
+		i => canvasFGs[i] || currentFGs[i],
+		i => canvasBGs[i] || currentBGs[i]
+	);
 
 	const handleRender = (renderFunction, ghost = false) => {
 		if (manager.pauseRenders || this.pauseRenders) return;
@@ -206,39 +219,37 @@ const TextDisplayBuffer = function(manager, x, y, width, height, zIndex) {
 	}
 
 	let movePending = false;
-
-	// TODO: Make render and paint execute a pending move
-	this.render = () => handleRender(render);
-	this.paint = () => handleRender(paint);
-	this.ghostRender = () => {
-		if (!movePending) handleRender(render, true);
-		else { // Execute the ghost move and then paint the canvas as well
-			handleRender(move, true);
-			this.x = bufferX = pendingX;
-			this.y = bufferY = pendingY;
-			handleRender(paint, true);
-			movePending = false;
-			return;
-		}
-	}
 	this.move = (newX, newY) => {
-		pendingX = newX;
-		pendingY = newY;
-		handleRender(move);
-		this.x = bufferX = pendingX;
-		this.y = bufferY = pendingY;
-	}
-	this.quietMove = (newX, newY) => {
-		pendingX = newX;
-		pendingY = newY;
+		newBufferX = newX;
+		newBufferY = newY;
 		movePending = true;
+		return this;
 	}
+
+	const evaluateMove = (noMove, yesMove, ghost = false) => {
+		if (movePending) {
+			handleRender(yesMove, ghost);
+			this.x = bufferX = newBufferX;
+			this.y = bufferY = newBufferY;
+			movePending = false;
+		} else handleRender(noMove, ghost);
+		return this;
+	}
+
+	this.render = () => evaluateMove(render, renderMove);
+	this.paint = () => evaluateMove(paint, paintMove);
+
+	// Only gets called by manager
+	this.ghostRender = () => evaluateMove(render, renderMove, true);
+	this.ghostPaint = () => evaluateMove(paint, paintMove, true);
 
 	/* TODO:
 		[x] this.move(screenX, screenY);
-		[x] this.quietMove(screenX, screenY);
+		[ ] this.quietMove(screenX, screenY);
 		[ ] this.setZIndex(zIndex); ehh, when are you really gonna change the zIndex?
-		    - change the construction SLL order and determine output
+			- change the construction SLL order and determine output
+		[x] quietMove should go away. There should just be a move function, then you have to call
+			buffer.render(), buffer.paint(), manager.massRender(), or manager.massPaint()
 	*/
 }
 

@@ -1,4 +1,4 @@
-const { hexDebugString, PixelData } = require('./utils.js');
+const { Pixel } = require('./utils.js');
 
 const PixelDisplayBuffer = function(manager, x, y, width, height, zIndex) {
 	// Private variables for internal reference
@@ -125,7 +125,7 @@ const PixelDisplayBuffer = function(manager, x, y, width, height, zIndex) {
 		const y = Math.floor(botIndex / bufferWidth) - 1;
 		const screenX = bufferX + x;
 		const screenY = Math.floor((bufferY + y) / 2);
-		const pixel = new PixelData(top, bottom);
+		const pixel = new Pixel(top, bottom);
 		requestFunction(bufferId, pixel, screenX, screenY, bufferZ);
 	}
 
