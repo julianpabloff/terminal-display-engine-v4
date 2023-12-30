@@ -79,7 +79,6 @@ const TextDisplayBuffer = function(manager, x, y, width, height, zIndex) {
 		let i = 0;
 		do { // Loop through string
 			const index = cursorIndex + i;
-			// if (bg == undefined && !brush.bg) brush.bg = canvasBGs[index];
 			writeToCanvas(index, string.charCodeAt(i), brush);
 			i++;
 		} while (i < amount);
@@ -107,10 +106,10 @@ const TextDisplayBuffer = function(manager, x, y, width, height, zIndex) {
 		return this;
 	}
 
-	this.fill = color => {
-		const brush = manager.processBrush(0, color, this.opacity);
-		canvasCodes.fill(32);
-		canvasFGs.fill(0);
+	this.fill = (bg, char = ' ', fg) => {
+		const brush = manager.processBrush(fg, bg, this.opacity);
+		canvasCodes.fill(char.charCodeAt(0));
+		canvasFGs.fill(brush.fg);
 		canvasBGs.fill(brush.bg);
 		return this;
 	}
@@ -158,9 +157,9 @@ const TextDisplayBuffer = function(manager, x, y, width, height, zIndex) {
 
 	let newBufferX, newBufferY;
 	const move = (index, requestFunction, getCode, getFg, getBg) => {
-		const code = getCode(index);
-		const fg = getFg(index);
-		const bg = getBg(index);
+		const code = getCode();
+		const fg = getFg();
+		const bg = getBg();
 		transferToCurrent(index, code, fg, bg);
 
 		const localX = index % bufferWidth;
@@ -193,18 +192,18 @@ const TextDisplayBuffer = function(manager, x, y, width, height, zIndex) {
 	const renderMove = (index, requestFunction) => move(
 		index,
 		requestFunction,
-		i => canvasCodes[i],
-		i => canvasFGs[i],
-		i => canvasBGs[i]
+		() => canvasCodes[index],
+		() => canvasFGs[index],
+		() => canvasBGs[index]
 	);
 
 	// Move function with paint canvas handling
 	const paintMove = (index, requestFunction) => move(
 		index,
 		requestFunction,
-		i => canvasCodes[i] || currentCodes[i],
-		i => canvasFGs[i] || currentFGs[i],
-		i => canvasBGs[i] || currentBGs[i]
+		() => canvasCodes[index] || currentCodes[index],
+		() => canvasFGs[index] || currentFGs[index],
+		() => canvasBGs[index] || currentBGs[index]
 	);
 
 	const handleRender = (renderFunction, ghost = false) => {
@@ -219,20 +218,21 @@ const TextDisplayBuffer = function(manager, x, y, width, height, zIndex) {
 	}
 
 	let movePending = false;
-	this.move = (newX, newY) => {
-		newBufferX = newX;
-		newBufferY = newY;
+	this.move = (x, y) => {
+		newBufferX = x;
+		newBufferY = y;
 		movePending = true;
 		return this;
 	}
 
 	const evaluateMove = (noMove, yesMove, ghost = false) => {
-		if (movePending) {
+		if (!movePending) handleRender(noMove, ghost);
+		else {
 			handleRender(yesMove, ghost);
 			this.x = bufferX = newBufferX;
 			this.y = bufferY = newBufferY;
 			movePending = false;
-		} else handleRender(noMove, ghost);
+		}
 		return this;
 	}
 

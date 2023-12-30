@@ -1,7 +1,7 @@
 const TextDisplayBuffer = require('./buffer.js');
 const PixelDisplayBuffer = require('./pixelBuffer.js');
 const Construction = require('./construction.js');
-const { getHex, getOpacity, checkOpacity, fadeColor } = require('./utils.js');
+const { checkOpacity, fadeColor, getHex, getOpacity } = require('./utils.js');
 
 const TerminalDisplayEngine = function() {
 	// In-application configuration

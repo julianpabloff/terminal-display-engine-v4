@@ -1,4 +1,4 @@
-const { Pixel } = require('./utils.js');
+const { hexDebugString, Pixel } = require('./utils.js');
 
 const PixelDisplayBuffer = function(manager, x, y, width, height, zIndex) {
 	// Private variables for internal reference
@@ -44,8 +44,11 @@ const PixelDisplayBuffer = function(manager, x, y, width, height, zIndex) {
 		return this;
 	}
 
-	this.centerWidth = width => Math.floor(bufferWidth / 2 - width / 2);
-	this.centerHeight = height => Math.floor(bufferHeight / 2 - height / 2);
+	this.sample = (x, y) => {
+		const index = coordinateIndex(x, y);
+		if (index == null) return 0;
+		return current[index];
+	}
 
 	// this.write(color);
 	// this.write(color, count);
@@ -124,24 +127,25 @@ const PixelDisplayBuffer = function(manager, x, y, width, height, zIndex) {
 		const x = botIndex % bufferWidth;
 		const y = Math.floor(botIndex / bufferWidth) - 1;
 		const screenX = bufferX + x;
-		const screenY = Math.floor((bufferY + y) / 2);
+		// const screenY = Math.floor((bufferY + y) / 2);
+		const screenY = (bufferY + y) / 2;
 		const pixel = new Pixel(top, bottom);
 		requestFunction(bufferId, pixel, screenX, screenY, bufferZ);
 	}
 
-	const render = topIndex => {
+	const render = (topIndex, requestFunction) => {
 		const botIndex = topIndex + bufferWidth;
-		const top = canvas[topIndex];
-		const bottom = canvas[botIndex];
-		const currentTop = current[topIndex];
-		const currentBottom = current[botIndex];
+		const top = canvas[topIndex] | 0;
+		const bottom = canvas[botIndex] | 0;
+		const currentTop = current[topIndex] | 0;
+		const currentBottom = current[botIndex] | 0;
 		transferToCurrent(top, bottom, topIndex, botIndex);
 
 		if (top != currentTop || bottom != currentBottom)
-			sendDrawRequest(top, bottom, botIndex, manager.requestDraw);
+			sendDrawRequest(top, bottom, botIndex, requestFunction);
 	}
 
-	const paint = topIndex => {
+	const paint = (topIndex, requestFunction) => {
 		const botIndex = topIndex + bufferWidth;
 		const currentTop = current[topIndex] | 0;
 		const currentBottom = current[botIndex] | 0;
@@ -150,42 +154,170 @@ const PixelDisplayBuffer = function(manager, x, y, width, height, zIndex) {
 		transferToCurrent(top, bottom, topIndex, botIndex);
 
 		if (top != currentTop || bottom != currentBottom)
-			sendDrawRequest(top, bottom, botIndex, manager.requestDraw);
+			sendDrawRequest(top, bottom, botIndex, requestFunction);
 	}
 
-	const ghostRender = topIndex => {
+	let newBufferX, newBufferY;
+	/*
+		This whole fucking algorithm doesn't work, due, fundementally, to the method of iteration.
+		I am trying to iterate two pixel rows at a time, but when the new buffer draw (in the new
+		location) takes up more than the amount of char rows (when the buffer starts perfectly even
+		with the char rows, then ends up straddling them) the thing can't be drawn fully. What, do I
+		need a fucking if statement for that case? No I need to zoom way out and change how I'm
+		iterating and processing the canvas information. Gah.
+
+		If I were to iterate through each pixel on the buffer individually, I would be able to use a
+		similar method to the text buffer's move method. I still have to send a request for a top and
+		bottom, as a pair. Maybe I should iterate down each column instead of across each row?
+	*/
+	const shitMove = (topIndex, requestFunction, getTop, getBottom, screenShiftY) => {
 		const botIndex = topIndex + bufferWidth;
-		const top = canvas[topIndex];
-		const bottom = canvas[botIndex];
-		const currentTop = current[topIndex];
-		const currentBottom = current[botIndex];
-		transferToCurrent(top, bottom, topIndex, botIndex);
+		const top = getTop(topIndex);
+		const bottom = getBottom(topIndex);
+		let canvasTop = canvas[topIndex] | 0;
+		let canvasBottom = canvas[botIndex] | 0;
+		// transferToCurrent(canvasTop, canvasBottom, topIndex, botIndex);
 
-		if (top != currentTop || bottom != currentBottom)
-			sendDrawRequest(top, bottom, botIndex, manager.requestGhostDraw);
+		const localX = botIndex % bufferWidth;
+		const localY = Math.floor(botIndex / bufferWidth) - 1;
+		// const drawX = newBufferX + localX;
+		const drawX = 7 + localX;
+		const rowNumber = localY + 1 * (bufferY & 1);
+		const drawY = Math.floor((newBufferY + rowNumber + screenShiftY) / 2);
+
+		const lookaheadX = localX + (newBufferX - bufferX);
+		const lookaheadY = localY + (newBufferY - bufferY);
+		const lookaheadIndex = coordinateIndex(lookaheadX, lookaheadY);
+		const lookaheadTop = canvas[lookaheadIndex];
+		const lookaheadBottom = canvas[lookaheadIndex + bufferWidth];
+
+		const eraseX = bufferX + localX;
+		const eraseY = bufferY + localY;
+		const noEraseOverlapX = eraseX < newBufferX || eraseX > newBufferX + bufferWidth - 1;
+		const noEraseOverlapY = eraseY < newBufferY || eraseY > newBufferY + bufferHeight - 1;
+		if (noEraseOverlapX || noEraseOverlapY) {
+			// requestFunction(bufferId, new Pixel(), eraseX, Math.floor(eraseY / 2), bufferZ);
+		}
+
+		if (localX == 0 && localY == 0) {
+			setTimeout(() => {
+				console.log('\x1b[0m\n\n');
+				console.log('lookaheadX:', lookaheadX);
+				console.log('lookaheadY:', lookaheadY);
+				console.log('drawing top:', hexDebugString(top));
+				console.log('drawing bottom:', hexDebugString(bottom));
+				console.log('lookaheadTop:', hexDebugString(lookaheadTop));
+				console.log('lookaheadBottom:', hexDebugString(lookaheadBottom));
+				console.log('eraseY', eraseY);
+				console.log('screenEraseY', Math.floor(eraseY / 2));
+			}, 500);
+		}
+
+		// if (top != lookaheadTop || bottom != lookaheadBottom) {
+			const pixel = new Pixel(top, bottom);
+			requestFunction(bufferId, pixel, drawX, drawY, bufferZ);
+		// }
 	}
 
-	const handleRender = (renderFunction, execute = true) => {
+	const getCanvas = index => canvas[index] | 0;
+	const getCanvasOrCurrent = index => (canvas[index] || current[index]) | 0;
+
+	const renderMove = (shiftY, screenShiftY, ghost) => {
+		let getTop, getBottom;
+		const shiftDown = () => {
+			getTop = index => getCanvas(index - bufferWidth);
+			getBottom = index => getCanvas(index);
+		}
+		const shiftUp = () => {
+			getTop = index => getCanvas(index + bufferWidth);
+			getBottom = index => getCanvas(index + bufferWidth * 2);
+		}
+		if (shiftY == 0) {
+			getTop = index => getCanvas(index);
+			getBottom = index => getCanvas(index + bufferWidth);
+		} else if (shiftY == -1) {
+			if (screenShiftY) shiftDown();
+			else shiftUp();
+		} else { // if (shiftY == 1) {
+			if (screenShiftY) shiftUp();
+			else shiftDown();
+		}
+
+		const renderFunction = (topIndex, requestFunction) =>
+			move(topIndex, requestFunction, getTop, getBottom, screenShiftY);
+		handleRender(renderFunction, ghost);
+	}
+
+	const handleRender = (renderFunction, ghost = false) => {
 		if (manager.pauseRenders || this.pauseRenders) return;
+		const requestFunction = ghost ? manager.requestGhostDraw : manager.requestDraw;
 		let i = 0 - bufferWidth * (bufferY & 1);
 		do { // Loop through every other row
 			let j = 0;
-			do { // Loop through every column
-				renderFunction(i + j);
+			do { // Loop through each x coordinate
+				renderFunction(i + j, requestFunction); // i + j = topIndex
 				j++;
 			} while (j < bufferWidth);
 			i += bufferWidth * 2;
 		} while (i < bufferSize);
-		if (execute) manager.executeRender();
+		if (!ghost) manager.executeRender();
 	}
 
-	this.render = () => handleRender(render);
-	this.paint = () => handleRender(paint);
-	this.ghostRender = () => handleRender(ghostRender, false);
+	let movePending = false;
+	this.move = (x, y) => {
+		newBufferX = x;
+		newBufferY = y;
+		movePending = true;
+		return this;
+	}
+
+	const evaluateMove = (renderFunction, moveFunction, ghost = false) => {
+		if (!movePending) handleRender(renderFunction, ghost);
+		else {
+			const shiftY = (newBufferY - bufferY) % 2; // -1, 0, 1
+			const straddling = bufferY & 1;
+
+			/* screenShiftY determination:
+				It is what shiftY is, unless the buffer shifts up and the buffer isn't straddling
+				the character blocks, then screenShiftY becomes 0
+				
+				If the buffer is shifting up, for screenShiftY to not be 0 (but instead, -1), the buffer has
+				to be on an even starting position (not straddling the char blocks). That's because the top
+				half is at the top of the char block, and we then need to go up into the next char block
+
+				If the buffer is shifting up but bufferY is odd (straddling the char blocks) then
+				screenShiftY can be 0, since the bottom half (the top of the buffer) can become the
+				top half in the same char block
+
+				If the buffer is shifting down, for screenShiftY to not be 0 the buffer just has to
+				be 
+			*/
+			const matchShiftY = (shiftY < 0 && !straddling) || (shiftY > 0 && straddling);
+			const screenShiftY = shiftY * matchShiftY;
+
+			// console.log('\x1b[0m\n\n');
+			// console.log(bufferX, ',', bufferY, 'to', newBufferX, ',', newBufferY);
+
+			moveFunction(shiftY, screenShiftY, ghost);
+			// this.x = bufferX = newBufferX;
+			// this.y = bufferY = newBufferY;
+			movePending = false;
+		}
+		return this;
+	}
+
+	this.render = () => evaluateMove(render, renderMove);
+	this.paint = () => evaluateMove(paint, paintMove);
+
+	// Only gets called by manager
+	this.ghostRender = () => evaluateMove(render, renderMove, true);
+	this.ghostPaint = () => evaluateMove(paint, paintMove, true);
 
 	/* TODO:
+		[x] this.sample(x, y);
 		[ ] this.move(screenX, screenY);
-		[ ] this.quietMove(screenX, screenY);
+			- add renderMove and paintMove like TextDisplayBuffer
+			- add ghostRender and ghostPaint
 		[ ] this.setZIndex(zIndex); ehh, when are you really gonna change the zIndex?
 	*/
 }
